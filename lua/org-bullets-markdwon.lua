@@ -1,6 +1,6 @@
 local M = {}
 
-local api = vim.api
+local api, treesitter = vim.api, vim.treesitter
 
 local NAMESPACE = api.nvim_create_namespace("org-bullets-markdown")
 
