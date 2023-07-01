@@ -1,15 +1,8 @@
 local M = {}
 
-local api, treesitter = vim.api, vim.treesitter
+local api = vim.api
 
-local NAMESPACE = api.nvim_create_namespace("org-bullets-markdown")
-local org_markdown_headline_hl = "OrgMarkdownHeadlineLevel"
-
-local list_groups = {
-  ["-"] = "OrgMarkdownBulletsDash",
-  ["+"] = "OrgMarkdownBulletsPlus",
-  ["*"] = "OrgMarkdownBulletsStar",
-}
+local NAMESPACE = api.nvim_create_namespace("mkd-bullets")
 
 ---@class BulletsConfig
 ---@field public show_current_line boolean
@@ -18,18 +11,21 @@ local list_groups = {
 local defaults = {
   show_current_line = false,
   symbols = {
-    list = "•",
-    headlines = { "◉", "○", "✸", "✿" },
-    checkboxes = {
-      half = { "", "OrgTSCheckboxHalfChecked" },
-      done = { "✓", "OrgDone" },
-      todo = { "˟", "OrgTODO" },
-    },
+    -- mkd_bullets = { "⦿", "◎", "✺", "◌", "▶", "⤷" },
+    mkd_bullets = { "◉", "○", "✸", "•", "◦" },
+    -- mkd_bullets = { "•" },
+    -- mkd_bullets = { "●", "○", "•", "✿" },
+    -- checkboxes = { "", "" },
+    checkboxes = { "˟", "✓" },
+    -- checkboxes = { "", "" },
+    -- checkboxes = { "", "" },
+    -- checkboxes = { "", "✔", "✓" },
   },
+  bullets_highlights = { "Function", "Number", "Keyword", "String" },
+  -- bullets_highlights = { "DiagnosticInfo", "Number", "Keyword", "String" },
+  -- checkbox_highlights = { "NoiceCompletionItemKindProperty", "NoiceCompletionItemKindConstant" },
+  checkbox_highlights = { "Function", "Keyword" },
   indent = true,
-  -- TODO: should this read from the user's conceal settings?
-  -- maybe but that option is a little complex and will make
-  -- the implementation more convoluted
   concealcursor = false,
 }
 
@@ -49,43 +45,40 @@ end
 ---Add padding to the given symbol
 ---@param symbol string
 ---@param padding_spaces number
----@param padding_in_front boolean
-local function add_symbol_padding(symbol, padding_spaces, padding_in_front)
-  if padding_in_front then
+---@param bullet boolean
+local function add_symbol_padding(symbol, padding_spaces, bullet)
+  if bullet then
     return string.rep(" ", padding_spaces - 1) .. symbol
   else
-    return symbol .. string.rep(" ", padding_spaces)
+    return string.rep(" ", padding_spaces) .. symbol .. " "
   end
 end
 
---- @alias Markers table<fun(str: string, conf: BulletsConfig): string[][]>
-
----@type Markers
+---Sets of pairs {pattern = handler}
+---handler
 local markers = {
-  -- FIXME relying on the TS node types as keys for each marker is brittle
-  -- these should be changed to distinct constants
-  stars = function(str, conf)
-    local level = #str <= 0 and 0 or #str
-    local symbols = conf.symbols.headlines
-    local symbol = add_symbol_padding((symbols[level] or symbols[1]), level, conf.indent)
-    local highlight = org_markdown_headline_hl .. level
-    return { { symbol, highlight } }
-  end,
-  -- Checkboxes [x]
-  checkbox = function(str, conf)
-    local symbols = conf.symbols.checkboxes
-    local text = symbols.todo
-    if str:match("[Xx]") then
-      text = symbols.done
-    elseif str:match("-") then
-      text = symbols.half
+  ---@param str string
+  ---@param level BulletsConfig
+  ---@return table { string symbol, string highlight_group }
+  bullet = function(str, level)
+    local symbols_value = #config.symbols.mkd_bullets
+    local highlights_value = #config.bullets_highlights
+    if level + 1 <= highlights_value then
+      highlights_value = level + 1
     end
-    return { { "[", "NonText" }, text, { "]", "NonText" } }
+    if level + 1 <= symbols_value then
+      symbols_value = level + 1
+    end
+    local symbol = add_symbol_padding(config.symbols.mkd_bullets[symbols_value], (#str - 1), true)
+    return { { symbol, config.bullets_highlights[highlights_value] } }
   end,
-  -- List bullets *,+,-
-  bullet = function(str, conf)
-    local symbol = add_symbol_padding(conf.symbols.list, (#str - 1), true)
-    return { { symbol, list_groups[vim.trim(str)] } }
+  todo = function(str, status)
+    local symbols_value = 1
+    if status == "checked" then
+      symbols_value = 2
+    end
+    local symbol = add_symbol_padding(config.symbols.checkboxes[symbols_value], #str, false)
+    return { { symbol, config.checkbox_highlights[symbols_value] } }
   end,
 }
 
@@ -102,20 +95,33 @@ local function set_mark(bufnr, virt_text, lnum, start_col, end_col, highlight)
     hl_group = highlight,
     virt_text = virt_text,
     virt_text_pos = "overlay",
-    hl_mode = "combine",
+    -- hl_mode = "combine",
+    hl_mode = "blend",
     ephemeral = true,
   })
   if not ok then
     vim.schedule(function()
-      vim.notify_once(tostring(result), vim.log.levels.ERROR, { title = "Org bullets" })
+      vim.notify_once(result, vim.log.levels.ERROR, { title = "Markdown bullets" })
     end)
   end
+end
+
+--- Get the nested level of the list item
+---@param node userdata
+---@return integer nested level <= 3
+local function get_list_level(node)
+  local listNode = node:parent():parent()
+  local listParent = listNode:parent():type()
+  if listParent ~= "list_item" then
+    return 0
+  end
+  return get_list_level(listNode) + 1
 end
 
 --- Create a position object
 ---@param bufnr number
 ---@param name string
----@param node TSNode
+---@param node userdata
 ---@return Position
 local function create_position(bufnr, name, node)
   local type = node:type()
@@ -123,17 +129,14 @@ local function create_position(bufnr, name, node)
   return {
     name = name,
     type = type,
-    item = treesitter.get_node_text(node, bufnr),
+    item = vim.treesitter.get_node_text(node, bufnr),
     start_row = row1,
     start_col = col1,
     end_row = row2,
     end_col = col2,
+    level = get_list_level(node),
   }
 end
-
--- TODO: remove this when treesitter.query is stable
----@diagnostic disable-next-line: undefined-field
-local parse = treesitter.query and treesitter.query.parse or treesitter.parse_query
 
 --- Get the position objects for each time of item we are concealing
 ---@param bufnr number
@@ -143,22 +146,21 @@ local parse = treesitter.query and treesitter.query.parse or treesitter.parse_qu
 ---@return Position[]
 local function get_ts_positions(bufnr, start_row, end_row, root)
   local positions = {}
-  local query = parse(
+  local query = vim.treesitter.query.parse(
     "markdown",
     [[
-      (stars) @stars
-      ((bullet) @bullet
-        (#match? @bullet "[-\*\+]"))
-
-      (checkbox "[ ]") @org_checkbox
-      (checkbox status: (expr "str") @_org_checkbox_done_str (#any-of? @_org_checkbox_done_str "x" "X")) @org_checkbox_done
-      (checkbox status: (expr "-")) @org_checkbox_half
-    ]]
+			(list_marker_minus) @list_marker_minus
+			(list_marker_plus) @list_marker_plus
+			(list_marker_star) @list_marker_star
+			(task_list_marker_checked) @task_list_marker_checked
+			(task_list_marker_unchecked) @task_list_marker_unchecked
+        ]]
   )
   for _, match, _ in query:iter_matches(root, bufnr, start_row, end_row) do
     for id, node in pairs(match) do
       local name = query.captures[id]
-      if not vim.startswith(name, "_") then
+      -- if not vim.startswith(name, "_") then
+      if vim.startswith(node:type(), "list_marker") or vim.startswith(node:type(), "task_list_marker") then
         positions[#positions + 1] = create_position(bufnr, name, node)
       end
     end
@@ -179,11 +181,22 @@ end
 ---@param conf BulletsConfig
 local function set_position_marks(bufnr, positions, conf)
   for _, position in ipairs(positions) do
+    local itemType = "bullet"
+    local status = "unchecked"
+
+    if vim.startswith(position.name, "task_list_marker") then
+      itemType = "todo"
+    end
+    if position.name == "task_list_marker_checked" then
+      status = "checked"
+    end
+
     local str = position.item
     local start_row = position.start_row
     local start_col = position.start_col
     local end_col = position.end_col
-    local handler = markers[position.type]
+    local handler = markers[itemType]
+    local level = position.level
 
     -- Don't add conceal on the current cursor line if the user doesn't want it
     local is_concealed = true
@@ -192,21 +205,34 @@ local function set_position_marks(bufnr, positions, conf)
       is_concealed = start_row ~= (cursor_row - 1)
     end
     if is_concealed and start_col > -1 and end_col > -1 and handler then
-      set_mark(bufnr, handler(str, conf), start_row, start_col, end_col)
+      if itemType == "bullet" then
+        set_mark(bufnr, handler(str, level), start_row, start_col, end_col)
+      end
+      if itemType == "todo" then
+        set_mark(bufnr, handler(str, status), start_row, start_col - 2, end_col)
+      end
     end
   end
 end
 
---- Get the position of the relevant org mode items to conceal
+local get_parser = (function()
+  local parsers = {}
+  return function(bufnr)
+    if parsers[bufnr] then
+      return parsers[bufnr]
+    end
+    parsers[bufnr] = vim.treesitter.get_parser(bufnr, "markdown", {})
+    return parsers[bufnr]
+  end
+end)()
+
+--- Get the position of the relevant items to conceal
 ---@param bufnr number
 ---@param start_row number
 ---@param end_row number
 ---@return Position[]
 local function get_mark_positions(bufnr, start_row, end_row)
-  local parser = treesitter.get_parser(bufnr, "markdown", {})
-  if not parser then
-    return {}
-  end
+  local parser = get_parser(bufnr)
   local positions = {}
   parser:for_each_tree(function(tstree, _)
     local root = tstree:root()
@@ -219,20 +245,12 @@ local function get_mark_positions(bufnr, start_row, end_row)
   return positions
 end
 
-local function set_highlights()
-  api.nvim_set_hl(0, "OrgMarkdownBulletsDash", { link = "OrgMarkdownHeadlineLevel1" })
-  api.nvim_set_hl(0, "OrgMarkdownBulletsPlus", { link = "OrgMarkdownHeadlineLevel2" })
-  api.nvim_set_hl(0, "OrgMarkdownBulletsStar", { link = "OrgMarkdownHeadlineLevel3" })
-end
-
 local ticks = {}
 ---Save the user config and initialise the plugin
 ---@param conf BulletsConfig
 function M.setup(conf)
   conf = conf or {}
-  set_highlights()
   set_config(conf)
-
   api.nvim_set_decoration_provider(NAMESPACE, {
     on_start = function(_, tick)
       local buf = api.nvim_get_current_buf()
@@ -256,4 +274,33 @@ function M.setup(conf)
   })
 end
 
-return M
+M.setup({})
+
+function Get_ts_positions()
+  local parser = get_parser(0)
+  parser:for_each_tree(function(tstree, _)
+    -- local positions = {}
+    local nodes = {}
+    local root = tstree:root()
+    local query = vim.treesitter.query.parse(
+      "markdown",
+      [[
+				(list_marker_minus) @list_marker_minus
+			]]
+    )
+    for _, match, _ in query:iter_matches(root) do
+      for id, node in pairs(match) do
+        local name = query.captures[id]
+        if vim.startswith(node:type(), "list_marker") then
+          table.insert(
+            nodes,
+            { name = name, type = node:type(), item = vim.treesitter.get_node_text(node, 0) }
+          )
+          -- table.insert(nodes, get_list_level(node))
+        end
+      end
+    end
+    -- print(vim.inspect(positions))
+    print(vim.inspect(nodes))
+  end)
+end
