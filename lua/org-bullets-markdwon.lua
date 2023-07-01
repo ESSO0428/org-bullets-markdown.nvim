@@ -2,7 +2,7 @@ local M = {}
 
 local api = vim.api
 
-local NAMESPACE = api.nvim_create_namespace("mkd-bullets")
+local NAMESPACE = api.nvim_create_namespace("org-bullets-markdown")
 
 ---@class BulletsConfig
 ---@field public show_current_line boolean
