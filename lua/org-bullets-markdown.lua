@@ -101,13 +101,13 @@ local function set_mark(bufnr, virt_text, lnum, start_col, end_col, highlight)
   })
   if not ok then
     vim.schedule(function()
-      vim.notify_once(result, vim.log.levels.ERROR, { title = "Markdown bullets" })
+      vim.notify_once(tostring(result), vim.log.levels.ERROR, { title = "Markdown bullets" })
     end)
   end
 end
 
 --- Get the nested level of the list item
----@param node userdata
+---@param node TSNode
 ---@return integer nested level <= 3
 local function get_list_level(node)
   local listNode = node:parent():parent()
@@ -121,7 +121,7 @@ end
 --- Create a position object
 ---@param bufnr number
 ---@param name string
----@param node userdata
+---@param node TSNode
 ---@return Position
 local function create_position(bufnr, name, node)
   local type = node:type()
@@ -137,6 +137,12 @@ local function create_position(bufnr, name, node)
     level = get_list_level(node),
   }
 end
+
+
+-- TODO: remove this when treesitter.query is stable
+---@diagnostic disable-next-line: undefined-field
+local parse = treesitter.query and treesitter.query.parse or treesitter.parse_query
+
 
 --- Get the position objects for each time of item we are concealing
 ---@param bufnr number
@@ -242,6 +248,7 @@ local function get_mark_positions(bufnr, start_row, end_row)
     end
     positions = get_ts_positions(bufnr, start_row, end_row, root)
   end)
+  Get_ts_positions(bufnr, start_row, end_row)
   return positions
 end
 
@@ -274,21 +281,19 @@ function M.setup(conf)
   })
 end
 
-M.setup({})
-
-function Get_ts_positions()
+function Get_ts_positions(bufnr, start_row, end_row)
   local parser = get_parser(0)
   parser:for_each_tree(function(tstree, _)
     -- local positions = {}
     local nodes = {}
     local root = tstree:root()
-    local query = treesitter.query.parse(
+    local query = parse(
       "markdown",
       [[
 				(list_marker_minus) @list_marker_minus
 			]]
     )
-    for _, match, _ in query:iter_matches(root) do
+    for _, match, _ in query:iter_matches(root, bufnr, start_row, end_row) do
       for id, node in pairs(match) do
         local name = query.captures[id]
         if vim.startswith(node:type(), "list_marker") then
@@ -296,12 +301,9 @@ function Get_ts_positions()
             nodes,
             { name = name, type = node:type(), item = treesitter.get_node_text(node, 0) }
           )
-          -- table.insert(nodes, get_list_level(node))
         end
       end
     end
-    -- print(vim.inspect(positions))
-    print(vim.inspect(nodes))
   end)
 end
 
