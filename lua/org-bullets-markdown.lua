@@ -129,7 +129,7 @@ local function create_position(bufnr, name, node)
   return {
     name = name,
     type = type,
-    item = vim.treesitter.get_node_text(node, bufnr),
+    item = treesitter.get_node_text(node, bufnr),
     start_row = row1,
     start_col = col1,
     end_row = row2,
@@ -146,7 +146,7 @@ end
 ---@return Position[]
 local function get_ts_positions(bufnr, start_row, end_row, root)
   local positions = {}
-  local query = vim.treesitter.query.parse(
+  local query = treesitter.query.parse(
     "markdown",
     [[
 			(list_marker_minus) @list_marker_minus
@@ -221,7 +221,7 @@ local get_parser = (function()
     if parsers[bufnr] then
       return parsers[bufnr]
     end
-    parsers[bufnr] = vim.treesitter.get_parser(bufnr, "markdown", {})
+    parsers[bufnr] = treesitter.get_parser(bufnr, "markdown", {})
     return parsers[bufnr]
   end
 end)()
@@ -282,7 +282,7 @@ function Get_ts_positions()
     -- local positions = {}
     local nodes = {}
     local root = tstree:root()
-    local query = vim.treesitter.query.parse(
+    local query = treesitter.query.parse(
       "markdown",
       [[
 				(list_marker_minus) @list_marker_minus
@@ -294,7 +294,7 @@ function Get_ts_positions()
         if vim.startswith(node:type(), "list_marker") then
           table.insert(
             nodes,
-            { name = name, type = node:type(), item = vim.treesitter.get_node_text(node, 0) }
+            { name = name, type = node:type(), item = treesitter.get_node_text(node, 0) }
           )
           -- table.insert(nodes, get_list_level(node))
         end
@@ -304,3 +304,5 @@ function Get_ts_positions()
     print(vim.inspect(nodes))
   end)
 end
+
+return M
